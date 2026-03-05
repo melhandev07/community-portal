@@ -113,10 +113,15 @@ function getSheetHeaders(sheetName) {
 
 function getColumnIndex(sheetName, columnName) {
   const headers = getSheetHeaders(sheetName) || [];
-  // perform case-insensitive match
+  // perform case-insensitive match and allow fuzzy matches like "userEmail" vs "email"
   const lower = String(columnName).toLowerCase();
   for (let i = 0; i < headers.length; i++) {
-    if (String(headers[i]).toLowerCase() === lower) {
+    const headerLower = String(headers[i]).toLowerCase();
+    if (headerLower === lower) {
+      return i;
+    }
+    // fallback: if header contains the target name or vice versa
+    if (headerLower.includes(lower) || lower.includes(headerLower)) {
       return i;
     }
   }
@@ -146,6 +151,100 @@ function generateId() {
 
 function generateTimestamp() {
   return new Date().toISOString();
+}
+
+// ===== NEW HELPERS =====
+// Return a human-readable current month (e.g. "March" or "March 2026")
+function getCurrentMonth() {
+  const now = new Date();
+  return now.toLocaleString('default', { month: 'long' });
+}
+
+// Ensure donation sheet has the expected header columns and adds them if missing.
+function ensureDonationHeaders() {
+  const sheet = getSheet(SHEET_NAMES.donations);
+  if (!sheet) return;
+  const headers = getSheetHeaders(SHEET_NAMES.donations).map(h => String(h));
+  const lower = headers.map(h => h.toLowerCase());
+  const required = ['id', 'email', 'name', 'month', 'status', 'amount'];
+  let changed = false;
+  required.forEach(h => {
+    if (lower.indexOf(h) === -1) {
+      headers.push(h);
+      lower.push(h);
+      changed = true;
+    }
+  });
+  if (changed) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+}
+
+// Ensure at least one donation record exists for the given email.
+// If no row is found for that email, append a placeholder entry so
+// the user will appear in the admin donations table.
+function ensureDonationRecord(email) {
+  if (!email) return;
+  const sheet = getSheet(SHEET_NAMES.donations);
+  if (!sheet) return;
+
+  // make sure headers include 'name' and 'amount' (adds them if missing)
+  ensureDonationHeaders();
+
+  const data = sheet.getDataRange().getValues();
+  const currentMonth = getCurrentMonth();
+  if (data.length <= 1) {
+    // no records at all, just add one for the current month
+    // attempt to lookup user name from users sheet
+    let userName = '';
+    const userRow = findRowByValue(SHEET_NAMES.users, 'email', email);
+    if (userRow) {
+      const nameIdx = getColumnIndex(SHEET_NAMES.users, 'name');
+      if (nameIdx !== -1) userName = userRow.data[nameIdx] || '';
+    }
+    const newRow = [generateId(), email, userName, currentMonth, 'pending', ''];
+    sheet.appendRow(newRow);
+    return;
+  }
+
+  // headers to find email and month column indices
+  const headers = data[0].map(h => String(h).toLowerCase());
+  let emailIdx = headers.indexOf('email');
+  let monthIdx = headers.indexOf('month');
+  if (emailIdx === -1) {
+    for (let i = 0; i < headers.length; i++) {
+      if (headers[i].includes('email')) {
+        emailIdx = i;
+        break;
+      }
+    }
+  }
+  if (monthIdx === -1) {
+    for (let i = 0; i < headers.length; i++) {
+      if (headers[i].includes('month')) {
+        monthIdx = i;
+        break;
+      }
+    }
+  }
+
+  if (emailIdx === -1) {
+    // cannot locate email column, abort
+    return;
+  }
+
+  // check if there is already a row for this user and current month
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][emailIdx]).toLowerCase();
+    const rowMonth = monthIdx !== -1 ? String(data[i][monthIdx]) : '';
+    if (rowEmail === String(email).toLowerCase() && rowMonth === currentMonth) {
+      return; // record for this month already exists
+    }
+  }
+
+  // no matching entry for the current month, add placeholder
+  const newRow = [generateId(), email, currentMonth, 'pending', ''];
+  sheet.appendRow(newRow);
 }
 
 // SHA-256 Hash (using Apps Script native function)
@@ -203,6 +302,10 @@ function handleSignup(data) {
 
     sheet.appendRow(newRow);
 
+    // ensure the user has a placeholder donation record so they appear in the
+    // admin donations list right after signing up
+    ensureDonationRecord(data.email);
+
     return { success: true, message: 'User registered successfully. You can now login.' };
   } catch (error) {
     return { success: false, error: 'Signup error: ' + error.toString() };
@@ -236,6 +339,10 @@ function handleLogin(data) {
     }
 
     const nameIndex = getColumnIndex(SHEET_NAMES.users, 'name');
+
+    // make sure the user has a donation record even if they never signed up
+    ensureDonationRecord(data.email);
+
     return {
       success: true,
       user: {
@@ -355,6 +462,9 @@ function handleGetDonations(data) {
     const sheet = getSheet(SHEET_NAMES.donations);
     if (!sheet) return { success: false, error: 'Donations sheet not found' };
 
+    // make sure necessary headers exist before we read any rows
+    ensureDonationHeaders();
+
     const sheetData = sheet.getDataRange().getValues();
     if (sheetData.length <= 1) {
       return { success: true, donations: [] };
@@ -391,14 +501,24 @@ function handleGetDonations(data) {
           amount: amountVal
         };
 
-        // for admin responses attempt to include user details
-        if (data.allRecords && emailVal) {
+        // always attempt to attach user name from the donations row or users sheet
+        const nameVal = getValue(row, 'name') || '';
+        if (nameVal) {
+          donation.userName = nameVal;
+        } else if (emailVal) {
           const userRow = findRowByValue(SHEET_NAMES.users, 'email', emailVal);
           if (userRow) {
             const nameIdx = getColumnIndex(SHEET_NAMES.users, 'name');
+            donation.userName = userRow.data[nameIdx] || '';
+          }
+        }
+
+        // for admin responses attempt to include other user details
+        if (data.allRecords && emailVal) {
+          const userRow = findRowByValue(SHEET_NAMES.users, 'email', emailVal);
+          if (userRow) {
             const phoneIdx = getColumnIndex(SHEET_NAMES.users, 'phone');
             const addressIdx = getColumnIndex(SHEET_NAMES.users, 'address');
-            donation.userName = userRow.data[nameIdx] || '';
             donation.userPhone = userRow.data[phoneIdx] || '';
             donation.userAddress = userRow.data[addressIdx] || '';
           }
