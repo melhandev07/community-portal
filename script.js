@@ -1,5 +1,5 @@
 // ===== CONFIGURATION =====
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbxmA7hMnwOrrHoa7hd6KB3zZnNqnzgoSDJajfzUzgwuvzME299fS_BcxnRBYvdJbZAj/exec'; // Replace with your deployed GAS URL
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbzi7_aebZ0U8M4VNlHxZ70hqTcFVNLXEhmYeObyHXSVP4RvAoCSPyeCUIRzz-ZduWNT/exec'; // Replace with your deployed GAS URL
 const ADMIN_EMAIL = 'community@gmail.com';
 const ADMIN_PASSWORD = 'admin@community';
 
@@ -160,7 +160,8 @@ function logout() {
 async function handleLoginSubmit(e) {
     e.preventDefault();
 
-    const email = document.getElementById('loginEmail').value;
+    let email = document.getElementById('loginEmail').value;
+    email = email ? email.trim().toLowerCase() : '';
     const password = document.getElementById('loginPassword').value;
 
     // Check for admin login
@@ -204,7 +205,7 @@ async function handleSignupSubmit(e) {
 
     const userData = {
         name: document.getElementById('signupName').value,
-        email: document.getElementById('signupEmail').value,
+        email: (document.getElementById('signupEmail').value || '').trim().toLowerCase(),
         phone: document.getElementById('signupPhone').value,
         address: document.getElementById('signupAddress').value,
         password: document.getElementById('signupPassword').value
@@ -402,7 +403,8 @@ async function deleteLeader(id) {
 
 // ===== DONATION FUNCTIONS =====
 async function loadDonationStatus() {
-    const email = document.getElementById('donationEmail').value;
+    let email = document.getElementById('donationEmail').value;
+    email = email ? email.trim().toLowerCase() : '';
 
     if (!email) {
         showNotification('Please enter your email', 'error');
