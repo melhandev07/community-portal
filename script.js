@@ -1,5 +1,5 @@
 // ===== CONFIGURATION =====
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbzNGYzH1iogzve3Z37SCRvZapzy2lIrC2HPAHQQxGk3wC62fbCfBh6GtbBKBCoRSSAN/exec'; // Replace with your deployed GAS URL
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbxmA7hMnwOrrHoa7hd6KB3zZnNqnzgoSDJajfzUzgwuvzME299fS_BcxnRBYvdJbZAj/exec'; // Replace with your deployed GAS URL
 const ADMIN_EMAIL = 'community@gmail.com';
 const ADMIN_PASSWORD = 'admin@community';
 
@@ -411,8 +411,15 @@ async function loadDonationStatus() {
 
     try {
         const response = await callGAS('donations/get', { email });
+        console.log('Donation response:', response);
 
         if (response.success && response.donations) {
+            if (response.donations.length === 0) {
+                const tableBody = document.getElementById('donationTableBody');
+                tableBody.innerHTML = '<tr><td colspan="5" class="text-center">No donation records found for this email</td></tr>';
+                return;
+            }
+            
             const tableBody = document.getElementById('donationTableBody');
             tableBody.innerHTML = response.donations.map(donation => `
                 <tr>
@@ -429,6 +436,8 @@ async function loadDonationStatus() {
                     </td>
                 </tr>
             `).join('');
+        } else {
+            showNotification(response.error || 'Failed to load donation status', 'error');
         }
     } catch (error) {
         console.error('Error loading donations:', error);
@@ -440,15 +449,23 @@ async function loadDonationStatus() {
 async function loadAdminDonations() {
     try {
         const response = await callGAS('donations/get', { allRecords: true });
+        console.log('Admin donations response:', response);
 
         if (response.success && response.donations) {
+            if (response.donations.length === 0) {
+                const tableBody = document.getElementById('adminDonationsTableBody');
+                tableBody.innerHTML = '<tr><td colspan="7" class="text-center">No donation records found</td></tr>';
+                return;
+            }
+            
             const tableBody = document.getElementById('adminDonationsTableBody');
             tableBody.innerHTML = response.donations.map(donation => {
                 const amtDisplay = donation.amount ? donation.amount : '-';
                 const amtValue = donation.amount ? donation.amount : '';
+                const displayName = donation.userName && String(donation.userName).trim() ? donation.userName : 'unknown';
                 return `
                 <tr>
-                    <td>${donation.userName || '<em>unknown</em>'}</td>
+                    <td>${displayName}</td>
                     <td>${donation.email}</td>
                     <td>${donation.userPhone || '-'}</td>
                     <td>${donation.month}</td>
@@ -459,14 +476,19 @@ async function loadAdminDonations() {
                         </span>
                     </td>
                     <td>
-                        <button class="action-btn action-edit" onclick="editDonationStatus('${donation.id}', '${donation.userName || ''}', '${donation.email}', '${donation.userPhone || ''}', '${donation.month}', '${amtValue}', '${donation.status}')">Update</button>
+                        <button class="action-btn action-edit" onclick="editDonationStatus('${donation.id}', '${displayName}', '${donation.email}', '${donation.userPhone || ''}', '${donation.month}', '${amtValue}', '${donation.status}')">Update</button>
                     </td>
                 </tr>
             `;
             }).join('');
+        } else {
+            const tableBody = document.getElementById('adminDonationsTableBody');
+            tableBody.innerHTML = '<tr><td colspan="7" class="text-center">Error: ' + (response.error || 'Unknown error') + '</td></tr>';
         }
     } catch (error) {
         console.error('Error loading admin donations:', error);
+        const tableBody = document.getElementById('adminDonationsTableBody');
+        tableBody.innerHTML = '<tr><td colspan="7" class="text-center">Error: ' + error.message + '</td></tr>';
     }
 }
 
